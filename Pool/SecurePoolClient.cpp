@@ -3,24 +3,37 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 #ifndef _WIN32
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #endif
 
 extern void logToFile(int gpuIndex, const std::string& msg);
 
 namespace {
 constexpr const char* kPuzzle71Address = "1PWo3JeB9jrGwfHDNpdGK54CRas7fsVzXU";
-constexpr const char* kWinnerFile = "WINNER_P71.enc";
 
-bool writeEncryptedWinner(const std::string& address, const std::string& ciphertext) {
+std::string winnerFileName() {
+    std::ostringstream ss;
+    ss << "WINNER_P71_" << static_cast<long long>(std::time(nullptr)) << ".enc";
+    return ss.str();
+}
+
+bool writeEncryptedWinner(const std::string& filename,
+                          const std::string& address,
+                          const std::string& ciphertext) {
     const std::string payload =
         std::string("BTCPUZZLE-SECURE-V1\n") +
         "puzzle=71\n" +
@@ -29,13 +42,13 @@ bool writeEncryptedWinner(const std::string& address, const std::string& ciphert
         "ciphertext_base64=" + ciphertext + "\n";
 
 #ifdef _WIN32
-    std::ofstream out(kWinnerFile, std::ios::binary | std::ios::trunc);
+    std::ofstream out(filename, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) return false;
     out.write(payload.data(), static_cast<std::streamsize>(payload.size()));
     out.flush();
     return out.good();
 #else
-    const int fd = ::open(kWinnerFile, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+    const int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
     if (fd < 0) return false;
 
     size_t written = 0;
@@ -54,6 +67,24 @@ bool writeEncryptedWinner(const std::string& address, const std::string& ciphert
 #endif
 }
 
+void hardenProcess() {
+#ifndef _WIN32
+    // Files created from this point default to owner-only permissions.
+    ::umask(0077);
+
+    // Never leave a private key behind in a crash/core dump.
+    struct rlimit coreLimit;
+    coreLimit.rlim_cur = 0;
+    coreLimit.rlim_max = 0;
+    ::setrlimit(RLIMIT_CORE, &coreLimit);
+
+#ifdef __linux__
+    // Prevent ptrace/core-style inspection by unrelated same-user processes.
+    ::prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+#endif
+#endif
+}
+
 [[noreturn]] void secureExit(int code) {
     std::cout.flush();
     std::cerr.flush();
@@ -62,6 +93,8 @@ bool writeEncryptedWinner(const std::string& address, const std::string& ciphert
 } // namespace
 
 bool PoolClient::init() {
+    hardenProcess();
+
     if (!upstream_init()) return false;
 
     // Hardened v1 is intentionally scoped to Puzzle 71 only.
@@ -139,8 +172,9 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
         secureExit(112);
     }
 
-    if (!writeEncryptedWinner(address, encrypted)) {
-        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but WINNER_P71.enc could not be created; no secret transmitted");
+    const std::string filename = winnerFileName();
+    if (!writeEncryptedWinner(filename, address, encrypted)) {
+        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encrypted winner file could not be created; no secret transmitted");
         logMessage(DANGER, "[SECURITY] TARGET FOUND but encrypted winner file could not be created. Network stopped.");
         secureExit(113);
     }
@@ -152,7 +186,7 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
     std::cout << "\n========================================\n";
     std::cout << "[SECURITY] PUZZLE 71 TARGET FOUND\n";
     std::cout << "[SECURITY] Winner secret encrypted locally.\n";
-    std::cout << "[SECURITY] Saved to: " << kWinnerFile << "\n";
+    std::cout << "[SECURITY] Saved to: " << filename << "\n";
     std::cout << "[SECURITY] Pool communication stopped.\n";
     std::cout << "========================================\n";
 
