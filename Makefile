@@ -31,6 +31,12 @@ GENCODE = \
 # replaces only that diagnostic expression with the literal "Default".
 CUDA13_ENGINE_SRC = GPU/.GPUEngine.cuda13.cu
 
+# Keep PoolClient.cpp itself untouched. A temporary build-only copy renames
+# exactly three upstream method definitions so SecurePoolClient.cpp can expose
+# hardened wrappers using the original public names. This avoids global macros
+# that can collide with C++ standard-library identifiers such as basic_ios::init.
+UPSTREAM_POOL_SRC = Pool/.PoolClient.upstream.cpp
+
 ifdef gpu
 
 OBJET = $(addprefix $(OBJDIR)/, \
@@ -99,11 +105,14 @@ $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
 endif
 endif
 
-# Compile the original PoolClient.cpp under upstream_* method names. This keeps
-# the upstream implementation intact while letting SecurePoolClient.cpp expose
-# hardened public wrappers with the original method names.
 $(OBJDIR)/Pool/PoolClient.o: Pool/PoolClient.cpp
-	$(CXX) $(CXXFLAGS) -DPOOLCLIENT_UPSTREAM_IMPL -o $@ -c $<
+	@sed \
+		-e 's/PoolClient::init()/PoolClient::upstream_init()/g' \
+		-e 's/PoolClient::getRange(/PoolClient::upstream_getRange(/g' \
+		-e 's/PoolClient::onKeyFound(/PoolClient::upstream_onKeyFound(/g' \
+		Pool/PoolClient.cpp > $(UPSTREAM_POOL_SRC)
+	$(CXX) $(CXXFLAGS) -o $@ -c $(UPSTREAM_POOL_SRC)
+	@rm -f $(UPSTREAM_POOL_SRC)
 
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
@@ -134,3 +143,4 @@ clean:
 	@rm -f obj/hash/*.o
 	@rm -f obj/Pool/*.o
 	@rm -f $(CUDA13_ENGINE_SRC)
+	@rm -f $(UPSTREAM_POOL_SRC)
