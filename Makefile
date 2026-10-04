@@ -25,6 +25,12 @@ GENCODE = \
 -gencode arch=compute_100,code=sm_100 \
 -gencode arch=compute_100,code=compute_100
 
+# CUDA 13 removed cudaDeviceProp.computeMode. The upstream client only uses
+# that member for a human-readable diagnostic string in PrintCudaInfo(), never
+# for search logic. Build a temporary CUDA-13-compatible source copy that
+# replaces only that diagnostic expression with the literal "Default".
+CUDA13_ENGINE_SRC = GPU/.GPUEngine.cuda13.cu
+
 ifdef gpu
 
 OBJET = $(addprefix $(OBJDIR)/, \
@@ -76,16 +82,20 @@ endif
 ifdef gpu
 ifdef debug
 $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
+	@sed 's/sComputeMode\[deviceProp.computeMode\]/"Default"/g' GPU/GPUEngine.cu > $(CUDA13_ENGINE_SRC)
 	$(NVCC) -G -maxrregcount=0 --ptxas-options=-v --compile \
 	--compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -g \
 	-I$(CUDA)/include $(GENCODE) \
-	-o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
+	-o $(OBJDIR)/GPU/GPUEngine.o -c $(CUDA13_ENGINE_SRC)
+	@rm -f $(CUDA13_ENGINE_SRC)
 else
 $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
+	@sed 's/sComputeMode\[deviceProp.computeMode\]/"Default"/g' GPU/GPUEngine.cu > $(CUDA13_ENGINE_SRC)
 	$(NVCC) -maxrregcount=0 --ptxas-options=-v --compile \
 	--compiler-options -fPIC -ccbin $(CXXCUDA) -m64 -O2 \
 	-I$(CUDA)/include $(GENCODE) \
-	-o $(OBJDIR)/GPU/GPUEngine.o -c GPU/GPUEngine.cu
+	-o $(OBJDIR)/GPU/GPUEngine.o -c $(CUDA13_ENGINE_SRC)
+	@rm -f $(CUDA13_ENGINE_SRC)
 endif
 endif
 
@@ -123,3 +133,4 @@ clean:
 	@rm -f obj/GPU/*.o
 	@rm -f obj/hash/*.o
 	@rm -f obj/Pool/*.o
+	@rm -f $(CUDA13_ENGINE_SRC)
