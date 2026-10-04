@@ -153,12 +153,11 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
     }
 
     // From this point forward, do not call any upstream target notification
-    // function. The winner secret must not traverse CURL, Telegram or API share.
-    stopPing();
-
+    // function. Preserve the winner first; secureExit() below terminates every
+    // process thread, including any in-flight ping, without waiting on network I/O.
     if (publicKey == nullptr) {
         logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encryption key is unavailable; no secret written or transmitted");
-        logMessage(DANGER, "[SECURITY] TARGET FOUND but local encryption is unavailable. Network stopped.");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but local encryption is unavailable. Process terminating; plaintext was NOT saved.");
         secureExit(111);
     }
 
@@ -168,29 +167,30 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
     // when no key was loaded, so explicitly reject equality as well as empty output.
     if (encrypted.empty() || encrypted == privateKey) {
         logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encryption failed; no secret written or transmitted");
-        logMessage(DANGER, "[SECURITY] TARGET FOUND but encryption failed. Network stopped; plaintext was NOT saved.");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but encryption failed. Process terminating; plaintext was NOT saved.");
         secureExit(112);
     }
 
     const std::string filename = winnerFileName();
     if (!writeEncryptedWinner(filename, address, encrypted)) {
         logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encrypted winner file could not be created; no secret transmitted");
-        logMessage(DANGER, "[SECURITY] TARGET FOUND but encrypted winner file could not be created. Network stopped.");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but encrypted winner file could not be created. Process terminating.");
         secureExit(113);
     }
 
     // Intentionally log only the event and public address. Never the ciphertext
     // and never the plaintext private key.
-    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | encrypted locally | process terminating");
+    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | encrypted locally and fsynced | process terminating");
 
     std::cout << "\n========================================\n";
     std::cout << "[SECURITY] PUZZLE 71 TARGET FOUND\n";
     std::cout << "[SECURITY] Winner secret encrypted locally.\n";
-    std::cout << "[SECURITY] Saved to: " << filename << "\n";
-    std::cout << "[SECURITY] Pool communication stopped.\n";
+    std::cout << "[SECURITY] Saved and fsynced to: " << filename << "\n";
+    std::cout << "[SECURITY] Process terminating immediately.\n";
     std::cout << "========================================\n";
 
     // Immediate process termination ensures the unsafe upstream target branch in
-    // main.cpp is never reached after this callback returns.
+    // main.cpp is never reached after this callback returns and avoids waiting
+    // for ping/network threads before winner persistence.
     secureExit(0);
 }
