@@ -40,6 +40,7 @@ CUDA13_ENGINE_SRC = GPU/.GPUEngine.cuda13.cu
 UPSTREAM_POOL_SRC = Pool/.PoolClient.upstream.cpp
 
 SELFTEST_BIN = secure-winner-selftest
+RANGE_SELFTEST_BIN = secure-range-selftest
 SELFTEST_LFLAGS = -lpthread -lcurl -lssl -lcrypto
 
 ifdef gpu
@@ -142,6 +143,18 @@ $(SELFTEST_BIN): $(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o $(OBJDI
 
 secure-selftest: $(SELFTEST_BIN)
 
+# Offline/local harness for the exact range-validation function used by the
+# production getRange() wrapper. It supplies synthetic RangeData values and
+# therefore performs no HTTP request or pool communication.
+$(RANGE_SELFTEST_BIN): $(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o $(OBJDIR)/Pool/SecurePoolClient.o $(OBJDIR)/Pool/Logger.o tests/secure_range_selftest.cpp
+	@echo Making secure range self-test...
+	$(CXX) $(CXXFLAGS) tests/secure_range_selftest.cpp \
+		$(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o \
+		$(OBJDIR)/Pool/SecurePoolClient.o $(OBJDIR)/Pool/Logger.o \
+		$(SELFTEST_LFLAGS) -o $(RANGE_SELFTEST_BIN)
+
+secure-range-selftest: $(RANGE_SELFTEST_BIN)
+
 $(OBJET): | $(OBJDIR) $(OBJDIR)/GPU $(OBJDIR)/hash $(OBJDIR)/Pool
 
 $(OBJDIR):
@@ -164,3 +177,4 @@ clean:
 	@rm -f $(CUDA13_ENGINE_SRC)
 	@rm -f $(UPSTREAM_POOL_SRC)
 	@rm -f $(SELFTEST_BIN)
+	@rm -f $(RANGE_SELFTEST_BIN)
