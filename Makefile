@@ -37,6 +37,9 @@ CUDA13_ENGINE_SRC = GPU/.GPUEngine.cuda13.cu
 # that can collide with C++ standard-library identifiers such as basic_ios::init.
 UPSTREAM_POOL_SRC = Pool/.PoolClient.upstream.cpp
 
+SELFTEST_BIN = secure-winner-selftest
+SELFTEST_LFLAGS = -lpthread -lcurl -lssl -lcrypto
+
 ifdef gpu
 
 OBJET = $(addprefix $(OBJDIR)/, \
@@ -123,6 +126,18 @@ VanitySearch: $(OBJET)
 	@echo Making vanitysearch...
 	$(CXX) $(OBJET) $(LFLAGS) -o vanitysearch
 
+# Offline/local harness for the hardened winner path. It intentionally links
+# the exact same PoolClient/SecurePoolClient objects used by the production
+# binary, but it never requests a pool range and never starts pool pinging.
+$(SELFTEST_BIN): $(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o $(OBJDIR)/Pool/SecurePoolClient.o $(OBJDIR)/Pool/Logger.o tests/secure_winner_selftest.cpp
+	@echo Making secure winner self-test...
+	$(CXX) $(CXXFLAGS) tests/secure_winner_selftest.cpp \
+		$(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o \
+		$(OBJDIR)/Pool/SecurePoolClient.o $(OBJDIR)/Pool/Logger.o \
+		$(SELFTEST_LFLAGS) -o $(SELFTEST_BIN)
+
+secure-selftest: $(SELFTEST_BIN)
+
 $(OBJET): | $(OBJDIR) $(OBJDIR)/GPU $(OBJDIR)/hash $(OBJDIR)/Pool
 
 $(OBJDIR):
@@ -144,3 +159,4 @@ clean:
 	@rm -f obj/Pool/*.o
 	@rm -f $(CUDA13_ENGINE_SRC)
 	@rm -f $(UPSTREAM_POOL_SRC)
+	@rm -f $(SELFTEST_BIN)
