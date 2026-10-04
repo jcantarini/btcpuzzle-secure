@@ -85,33 +85,26 @@ public:
     PoolClient(const PoolConfig& cfg);
     ~PoolClient();
 
-    // The upstream implementation is retained under explicit names. The
-    // hardened public methods below wrap these entry points.
+    // Upstream entry points. The Makefile compiles an ephemeral copy of
+    // PoolClient.cpp in which only these three exact method definitions are
+    // renamed. No global preprocessor aliases are used.
     bool upstream_init();
     RangeData upstream_getRange(int gpuIndex);
     void upstream_onKeyFound(const std::string& address, const std::string& privateKey);
 
-#ifdef POOLCLIENT_UPSTREAM_IMPL
-    // Only PoolClient.cpp sees these aliases, so its original definitions are
-    // compiled unchanged under the upstream_* symbols.
-#define init upstream_init
-#define getRange upstream_getRange
-#define onKeyFound upstream_onKeyFound
-#else
-    // All other translation units use the hardened wrappers.
+    // Hardened public wrappers used by main.cpp.
     bool init();
     RangeData getRange(int gpuIndex);
     void onKeyFound(const std::string& address, const std::string& privateKey);
-#endif
 
     // Submit completed range with proof keys
     bool submitRange(const std::string& hex, const std::vector<std::string>& proofKeys);
 
-	// Submit encrypted key to pool (legacy upstream capability; hardened init
+    // Submit encrypted key to pool (legacy upstream capability; hardened init
     // requires save_key=false and the secure winner path never calls it.)
     bool submitKey(const std::string& encryptedKey);
 
-	// Ping mechanism to keep worker active on pool
+    // Ping mechanism to keep worker active on pool
     void startPing(const std::string& hex);
     void stopPing();
     void pingLoop();
@@ -123,7 +116,6 @@ public:
     // Get list of found proof keys
     std::vector<std::string> getProofKeys(const RangeData& range);
     std::string encryptData(const std::string& data);
-    
 
     // Send notifications
     bool notifyWorkerStarted();
