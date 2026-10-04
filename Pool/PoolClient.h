@@ -85,19 +85,30 @@ public:
     PoolClient(const PoolConfig& cfg);
     ~PoolClient();
 
-    // Initialize client (setup CURL, load encryption keys if needed)
-    bool init();
+    // The upstream implementation is retained under explicit names. The
+    // hardened public methods below wrap these entry points.
+    bool upstream_init();
+    RangeData upstream_getRange(int gpuIndex);
+    void upstream_onKeyFound(const std::string& address, const std::string& privateKey);
 
-    // Get new range from pool API
+#ifdef POOLCLIENT_UPSTREAM_IMPL
+    // Only PoolClient.cpp sees these aliases, so its original definitions are
+    // compiled unchanged under the upstream_* symbols.
+#define init upstream_init
+#define getRange upstream_getRange
+#define onKeyFound upstream_onKeyFound
+#else
+    // All other translation units use the hardened wrappers.
+    bool init();
     RangeData getRange(int gpuIndex);
+    void onKeyFound(const std::string& address, const std::string& privateKey);
+#endif
 
     // Submit completed range with proof keys
     bool submitRange(const std::string& hex, const std::vector<std::string>& proofKeys);
 
-    // Handle found key (called by VanitySearch callback)
-    void onKeyFound(const std::string& address, const std::string& privateKey);
-
-	// Submit encrypted key to pool (for untrusted computer mode, need save_key=true)
+	// Submit encrypted key to pool (legacy upstream capability; hardened init
+    // requires save_key=false and the secure winner path never calls it.)
     bool submitKey(const std::string& encryptedKey);
 
 	// Ping mechanism to keep worker active on pool
