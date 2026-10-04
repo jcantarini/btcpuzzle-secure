@@ -119,9 +119,23 @@ bool writeEncryptedWinner(const std::string& filename,
         written += static_cast<size_t>(n);
     }
 
-    const bool ok = (::fsync(fd) == 0);
-    ::close(fd);
-    return ok;
+    const bool fileSynced = (::fsync(fd) == 0);
+    const bool fileClosed = (::close(fd) == 0);
+    if (!fileSynced || !fileClosed) return false;
+
+#ifdef __linux__
+    // fsync() on the file persists its contents, but a newly-created filename
+    // also lives in the containing directory. Sync the current directory before
+    // declaring success so an abrupt power loss cannot leave a durable payload
+    // without a durable directory entry.
+    const int dirFd = ::open(".", O_RDONLY | O_DIRECTORY);
+    if (dirFd < 0) return false;
+    const bool dirSynced = (::fsync(dirFd) == 0);
+    const bool dirClosed = (::close(dirFd) == 0);
+    return dirSynced && dirClosed;
+#else
+    return true;
+#endif
 #endif
 }
 
@@ -237,19 +251,19 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
 
     const std::string filename = winnerFileName();
     if (!writeEncryptedWinner(filename, address, encrypted)) {
-        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encrypted winner file could not be created; no secret transmitted");
-        logMessage(DANGER, "[SECURITY] TARGET FOUND but encrypted winner file could not be created. Process terminating.");
+        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encrypted winner file could not be durably created; no secret transmitted");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but encrypted winner file could not be durably created. Process terminating.");
         secureExit(113);
     }
 
     // Intentionally log only the event and public address. Never the ciphertext
     // and never the plaintext private key.
-    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | EVP OAEP-SHA256 encrypted locally and fsynced | process terminating");
+    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | EVP OAEP-SHA256 encrypted locally | file+directory fsynced | process terminating");
 
     std::cout << "\n========================================\n";
     std::cout << "[SECURITY] PUZZLE 71 TARGET FOUND\n";
     std::cout << "[SECURITY] Winner secret encrypted locally with RSA-OAEP-SHA256.\n";
-    std::cout << "[SECURITY] Saved and fsynced to: " << filename << "\n";
+    std::cout << "[SECURITY] Saved and durably fsynced (file + directory) to: " << filename << "\n";
     std::cout << "[SECURITY] Process terminating immediately.\n";
     std::cout << "========================================\n";
 
