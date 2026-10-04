@@ -35,6 +35,8 @@ CUDA13_ENGINE_SRC = GPU/.GPUEngine.cuda13.cu
 # exactly three upstream method definitions so SecurePoolClient.cpp can expose
 # hardened wrappers using the original public names. This avoids global macros
 # that can collide with C++ standard-library identifiers such as basic_ios::init.
+# The build-only copy also removes the upstream "Example Encryption" demo so
+# the hardened client does not invoke legacy RSA encryption during init().
 UPSTREAM_POOL_SRC = Pool/.PoolClient.upstream.cpp
 
 SELFTEST_BIN = secure-winner-selftest
@@ -113,6 +115,8 @@ $(OBJDIR)/Pool/PoolClient.o: Pool/PoolClient.cpp
 		-e 's/PoolClient::init()/PoolClient::upstream_init()/g' \
 		-e 's/PoolClient::getRange(/PoolClient::upstream_getRange(/g' \
 		-e 's/PoolClient::onKeyFound(/PoolClient::upstream_onKeyFound(/g' \
+		-e '/std::string encryptedTest = encryptData("Hello from Btcpuzzle.info! Good luck on puzzles!");/d' \
+		-e '/logMessage(SUCCESS, ("Example Encryption   => " + encryptedTest).c_str());/d' \
 		Pool/PoolClient.cpp > $(UPSTREAM_POOL_SRC)
 	$(CXX) $(CXXFLAGS) -o $@ -c $(UPSTREAM_POOL_SRC)
 	@rm -f $(UPSTREAM_POOL_SRC)
