@@ -8,7 +8,7 @@ SRC = Base58.cpp IntGroup.cpp main.cpp Random.cpp \
       Vanity.cpp GPU/GPUGenerate.cpp hash/ripemd160.cpp \
       hash/sha256.cpp hash/sha512.cpp hash/ripemd160_sse.cpp \
       hash/sha256_sse.cpp Bech32.cpp Wildcard.cpp \
-      Pool/PoolConfig.cpp Pool/PoolClient.cpp Pool/Logger.cpp
+      Pool/PoolConfig.cpp Pool/PoolClient.cpp Pool/SecurePoolClient.cpp Pool/Logger.cpp
 
 OBJDIR = obj
 
@@ -33,7 +33,7 @@ OBJET = $(addprefix $(OBJDIR)/, \
         hash/ripemd160.o hash/sha256.o hash/sha512.o \
         hash/ripemd160_sse.o hash/sha256_sse.o \
         GPU/GPUEngine.o Bech32.o Wildcard.o \
-        Pool/PoolConfig.o Pool/PoolClient.o Pool/Logger.o)
+        Pool/PoolConfig.o Pool/PoolClient.o Pool/SecurePoolClient.o Pool/Logger.o)
 
 else
 
@@ -42,7 +42,7 @@ OBJET = $(addprefix $(OBJDIR)/, \
         IntMod.o Point.o SECP256K1.o Vanity.o GPU/GPUGenerate.o \
         hash/ripemd160.o hash/sha256.o hash/sha512.o \
         hash/ripemd160_sse.o hash/sha256_sse.o Bech32.o Wildcard.o \
-		Pool/PoolConfig.o Pool/PoolClient.o Pool/Logger.o)
+		Pool/PoolConfig.o Pool/PoolClient.o Pool/SecurePoolClient.o Pool/Logger.o)
 
 endif
 
@@ -89,6 +89,12 @@ $(OBJDIR)/GPU/GPUEngine.o: GPU/GPUEngine.cu
 endif
 endif
 
+# Compile the original PoolClient.cpp under upstream_* method names. This keeps
+# the upstream implementation intact while letting SecurePoolClient.cpp expose
+# hardened public wrappers with the original method names.
+$(OBJDIR)/Pool/PoolClient.o: Pool/PoolClient.cpp
+	$(CXX) $(CXXFLAGS) -DPOOLCLIENT_UPSTREAM_IMPL -o $@ -c $<
+
 $(OBJDIR)/%.o : %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
@@ -113,7 +119,6 @@ $(OBJDIR)/Pool: $(OBJDIR)
 	cd $(OBJDIR) && mkdir -p Pool
 
 clean:
-	@echo Cleaning...
 	@rm -f obj/*.o
 	@rm -f obj/GPU/*.o
 	@rm -f obj/hash/*.o
