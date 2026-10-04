@@ -8,6 +8,11 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
+
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -31,6 +36,59 @@ std::string winnerFileName() {
     return ss.str();
 }
 
+// Encrypt only the high-value winner path with OpenSSL's modern EVP interface.
+// OAEP uses SHA-256 for both the OAEP digest and MGF1 digest. Any failure returns
+// an empty string so the caller can fail closed without persisting plaintext.
+std::string encryptWinnerOaepSha256(const std::string& publicKeyPem,
+                                    const std::string& plaintext) {
+    BIO* bio = BIO_new_mem_buf(publicKeyPem.data(), static_cast<int>(publicKeyPem.size()));
+    if (bio == nullptr) return {};
+
+    EVP_PKEY* pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+    BIO_free(bio);
+    if (pkey == nullptr) return {};
+
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pkey, nullptr);
+    if (ctx == nullptr) {
+        EVP_PKEY_free(pkey);
+        return {};
+    }
+
+    bool ok = EVP_PKEY_encrypt_init(ctx) > 0 &&
+              EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) > 0 &&
+              EVP_PKEY_CTX_set_rsa_oaep_md(ctx, EVP_sha256()) > 0 &&
+              EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, EVP_sha256()) > 0;
+
+    size_t outLen = 0;
+    if (ok) {
+        ok = EVP_PKEY_encrypt(
+                 ctx,
+                 nullptr,
+                 &outLen,
+                 reinterpret_cast<const unsigned char*>(plaintext.data()),
+                 plaintext.size()) > 0;
+    }
+
+    std::vector<unsigned char> out;
+    if (ok && outLen > 0) {
+        out.resize(outLen);
+        ok = EVP_PKEY_encrypt(
+                 ctx,
+                 out.data(),
+                 &outLen,
+                 reinterpret_cast<const unsigned char*>(plaintext.data()),
+                 plaintext.size()) > 0;
+    } else {
+        ok = false;
+    }
+
+    EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+
+    if (!ok) return {};
+    return std::string(reinterpret_cast<const char*>(out.data()), outLen);
+}
+
 bool writeEncryptedWinner(const std::string& filename,
                           const std::string& address,
                           const std::string& ciphertext) {
@@ -38,7 +96,7 @@ bool writeEncryptedWinner(const std::string& filename,
         std::string("BTCPUZZLE-SECURE-V1\n") +
         "puzzle=71\n" +
         "address=" + address + "\n" +
-        "encryption=RSA-OAEP\n" +
+        "encryption=RSA-OAEP-SHA256-MGF1-SHA256\n" +
         "ciphertext_base64=" + ciphertext + "\n";
 
 #ifdef _WIN32
@@ -117,7 +175,7 @@ bool PoolClient::init() {
     }
 
     logMessage(SUCCESS, "[SECURITY] Puzzle 71 hardened mode active");
-    logMessage(SUCCESS, "[SECURITY] Winner key: local encryption only, no network sharing");
+    logMessage(SUCCESS, "[SECURITY] Winner key: local EVP RSA-OAEP-SHA256 encryption only, no network sharing");
     return true;
 }
 
@@ -155,19 +213,25 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
     // From this point forward, do not call any upstream target notification
     // function. Preserve the winner first; secureExit() below terminates every
     // process thread, including any in-flight ping, without waiting on network I/O.
-    if (publicKey == nullptr) {
+    if (publicKey == nullptr || config.publicKeyString.empty()) {
         logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encryption key is unavailable; no secret written or transmitted");
         logMessage(DANGER, "[SECURITY] TARGET FOUND but local encryption is unavailable. Process terminating; plaintext was NOT saved.");
         secureExit(111);
     }
 
-    const std::string encrypted = encryptData(privateKey);
+    const std::string encryptedRaw = encryptWinnerOaepSha256(config.publicKeyString, privateKey);
+    if (encryptedRaw.empty()) {
+        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but EVP OAEP-SHA256 encryption failed; no secret written or transmitted");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but EVP OAEP-SHA256 encryption failed. Process terminating; plaintext was NOT saved.");
+        secureExit(112);
+    }
 
-    // Fail closed. encryptData() in upstream historically returned plaintext
-    // when no key was loaded, so explicitly reject equality as well as empty output.
+    const std::string encrypted = base64Encode(
+        reinterpret_cast<const unsigned char*>(encryptedRaw.data()), encryptedRaw.size());
+
     if (encrypted.empty() || encrypted == privateKey) {
-        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but encryption failed; no secret written or transmitted");
-        logMessage(DANGER, "[SECURITY] TARGET FOUND but encryption failed. Process terminating; plaintext was NOT saved.");
+        logToFile(config.gpuIndex, "SECURITY WINNER DETECTED but ciphertext encoding failed; no secret written or transmitted");
+        logMessage(DANGER, "[SECURITY] TARGET FOUND but ciphertext encoding failed. Process terminating; plaintext was NOT saved.");
         secureExit(112);
     }
 
@@ -180,11 +244,11 @@ void PoolClient::onKeyFound(const std::string& address, const std::string& priva
 
     // Intentionally log only the event and public address. Never the ciphertext
     // and never the plaintext private key.
-    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | encrypted locally and fsynced | process terminating");
+    logToFile(config.gpuIndex, std::string("SECURITY TARGET FOUND: ") + address + " | EVP OAEP-SHA256 encrypted locally and fsynced | process terminating");
 
     std::cout << "\n========================================\n";
     std::cout << "[SECURITY] PUZZLE 71 TARGET FOUND\n";
-    std::cout << "[SECURITY] Winner secret encrypted locally.\n";
+    std::cout << "[SECURITY] Winner secret encrypted locally with RSA-OAEP-SHA256.\n";
     std::cout << "[SECURITY] Saved and fsynced to: " << filename << "\n";
     std::cout << "[SECURITY] Process terminating immediately.\n";
     std::cout << "========================================\n";
