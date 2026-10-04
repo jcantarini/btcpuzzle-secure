@@ -28,6 +28,11 @@ struct RangeData {
     std::string error;
 };
 
+// Hardened, network-independent validation applied to every successful Puzzle 71
+// range returned by the pool. Exposed so the exact production validation can be
+// exercised with synthetic responses in the offline security self-test.
+bool validateSecurePuzzle71Range(RangeData& result);
+
 // Found key information
 struct FoundKey {
     std::string address;
