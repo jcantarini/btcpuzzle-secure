@@ -164,6 +164,24 @@ void hardenProcess() {
 }
 } // namespace
 
+bool validateSecurePuzzle71Range(RangeData& result) {
+    if (result.targetAddress != kPuzzle71Address) {
+        result.success = false;
+        result.error = "SECURITY: API targetAddress does not match hardcoded Puzzle 71 address";
+        return false;
+    }
+
+    if (std::find(result.proofOfWorkAddresses.begin(),
+                  result.proofOfWorkAddresses.end(),
+                  kPuzzle71Address) != result.proofOfWorkAddresses.end()) {
+        result.success = false;
+        result.error = "SECURITY: Puzzle 71 target appeared in proofOfWorkAddresses";
+        return false;
+    }
+
+    return true;
+}
+
 bool PoolClient::init() {
     hardenProcess();
 
@@ -197,22 +215,8 @@ RangeData PoolClient::getRange(int gpuIndex) {
     RangeData result = upstream_getRange(gpuIndex);
     if (!result.success) return result;
 
-    // Never trust the pool to define the high-value target.
-    if (result.targetAddress != kPuzzle71Address) {
-        result.success = false;
-        result.error = "SECURITY: API targetAddress does not match hardcoded Puzzle 71 address";
-        logToFile(config.gpuIndex, "SECURITY getRange(): rejected targetAddress mismatch");
-        return result;
-    }
-
-    // Prevent the real target from ever being downgraded to a proof address.
-    if (std::find(result.proofOfWorkAddresses.begin(),
-                  result.proofOfWorkAddresses.end(),
-                  kPuzzle71Address) != result.proofOfWorkAddresses.end()) {
-        result.success = false;
-        result.error = "SECURITY: Puzzle 71 target appeared in proofOfWorkAddresses";
-        logToFile(config.gpuIndex, "SECURITY getRange(): rejected Puzzle 71 target inside proof list");
-        return result;
+    if (!validateSecurePuzzle71Range(result)) {
+        logToFile(config.gpuIndex, std::string("SECURITY getRange(): ") + result.error);
     }
 
     return result;
