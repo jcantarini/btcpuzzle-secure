@@ -153,8 +153,6 @@ $(RANGE_SELFTEST_BIN): $(OBJDIR)/Pool/PoolConfig.o $(OBJDIR)/Pool/PoolClient.o $
 		$(OBJDIR)/Pool/SecurePoolClient.o $(OBJDIR)/Pool/Logger.o \
 		$(SELFTEST_LFLAGS) -o $(RANGE_SELFTEST_BIN)
 
-secure-range-selftest: $(RANGE_SELFTEST_BIN)
-
 $(OBJET): | $(OBJDIR) $(OBJDIR)/GPU $(OBJDIR)/hash $(OBJDIR)/Pool
 
 $(OBJDIR):
