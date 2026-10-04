@@ -2,6 +2,8 @@
 #include "Logger.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -31,10 +33,23 @@ namespace {
 constexpr const char* kPuzzle71Address = "1PWo3JeB9jrGwfHDNpdGK54CRas7fsVzXU";
 
 std::string winnerFileName() {
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(now).count();
+
     std::ostringstream ss;
-    ss << "WINNER_P71_" << static_cast<long long>(std::time(nullptr)) << ".enc";
+    ss << "WINNER_P71_" << micros << ".enc";
     return ss.str();
 }
+
+#ifndef _WIN32
+bool fsyncRetryEintr(int fd) {
+    while (true) {
+        if (::fsync(fd) == 0) return true;
+        if (errno == EINTR) continue;
+        return false;
+    }
+}
+#endif
 
 // Encrypt only the high-value winner path with OpenSSL's modern EVP interface.
 // OAEP uses SHA-256 for both the OAEP digest and MGF1 digest. Any failure returns
@@ -112,6 +127,7 @@ bool writeEncryptedWinner(const std::string& filename,
     size_t written = 0;
     while (written < payload.size()) {
         const ssize_t n = ::write(fd, payload.data() + written, payload.size() - written);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) {
             ::close(fd);
             return false;
@@ -119,7 +135,7 @@ bool writeEncryptedWinner(const std::string& filename,
         written += static_cast<size_t>(n);
     }
 
-    const bool fileSynced = (::fsync(fd) == 0);
+    const bool fileSynced = fsyncRetryEintr(fd);
     const bool fileClosed = (::close(fd) == 0);
     if (!fileSynced || !fileClosed) return false;
 
@@ -130,7 +146,7 @@ bool writeEncryptedWinner(const std::string& filename,
     // without a durable directory entry.
     const int dirFd = ::open(".", O_RDONLY | O_DIRECTORY);
     if (dirFd < 0) return false;
-    const bool dirSynced = (::fsync(dirFd) == 0);
+    const bool dirSynced = fsyncRetryEintr(dirFd);
     const bool dirClosed = (::close(dirFd) == 0);
     return dirSynced && dirClosed;
 #else
